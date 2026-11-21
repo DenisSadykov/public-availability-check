@@ -1,0 +1,35 @@
+name: Validate monitor syntax
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**']
+permissions: {}
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate immutable public workflow source without executing it
+        env:
+          SOURCE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PYTHON'
+          import ast, os, re, urllib.request
+          repository, sha = os.environ['SOURCE_REPOSITORY'], os.environ['SOURCE_SHA']
+          assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository)
+          assert re.fullmatch(r'[0-9a-f]{40}', sha)
+          url = 'https://raw.githubusercontent.com/' + repository + '/' + sha + '/.github/workflows/check.yml'
+          with urllib.request.urlopen(url, timeout=20) as response:
+              source = response.read(131073).decode()
+          assert len(source.encode()) <= 131072
+          match = re.search(r"cron: '([^']+)'", source)
+          assert match and match.group(1).split()[1:] == ['*', '*', '*', '*']
+          assert [int(item) for item in match.group(1).split()[0].split(',')] == list(range(2, 60, 5))
+          body = source.split("python3 - <<'PYTHON'\n", 1)[1].rsplit('PYTHON', 1)[0]
+          import textwrap
+          ast.parse(textwrap.dedent(body))
+          assert 'permissions: {}' in source
+          print('Cron equivalence and embedded Python syntax verified; candidate code not executed')
+          PYTHON
